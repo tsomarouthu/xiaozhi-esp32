@@ -1452,6 +1452,10 @@ def _configure_build(
     if Path("sdkconfig.defaults").exists():
         defaults.append("sdkconfig.defaults")
     defaults.append(fragment.as_posix())
+    # Optional git-ignored local overrides (e.g. a LAN OTA URL kept out of the repo).
+    # Listed last so it overrides both sdkconfig.defaults and the board's config.json.
+    if Path("sdkconfig.local").exists():
+        defaults.append("sdkconfig.local")
     _run_idf(
         f"-DIDF_TARGET={target}",
         f"-DSDKCONFIG_DEFAULTS={';'.join(defaults)}",
