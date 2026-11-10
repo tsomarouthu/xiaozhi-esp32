@@ -5,6 +5,7 @@
 #include "button.h"
 #include "config.h"
 #include "rgb_single_led.h"
+#include "settings.h"
 
 #include <esp_log.h>
 #include <driver/gpio.h>
@@ -77,6 +78,24 @@ public:
         InitializeLvglHeadless();
         InitializeAmplifier();
         InitializeButtons();
+        InitializeWakeVolume();
+    }
+
+    // Wake-volume policy (2026-11-10): the toy always powers on quiet, and although the
+    // child can raise it by voice within a session, it returns to the quiet default on
+    // every wake/boot. So we force the NVS "output_volume" key that AudioCodec::Start()
+    // reads (stock default 70) back to WAKE_VOLUME each boot. NoAudioCodec volume is
+    // square-law: factor = (vol/100)^2, so dial 14 -> ~0.02 linear (the level settled in
+    // voice_test). The quietest the child can go is dial 10 (~0.01); the louder ceiling is 60.
+    //
+    // Only the wake default lives here. The step size (+20 per "louder"), the quiet floor
+    // (10) and the louder ceiling (60, above which the toy asks the child to have the
+    // moderator raise it) live in the server prompt ("the Brain"), so the moderator can
+    // change them without reflashing.
+    static constexpr int WAKE_VOLUME = 14;   // 0-100 dial; square-law -> ~0.02 linear (voice_test level)
+    void InitializeWakeVolume() {
+        Settings settings("audio", true);
+        settings.SetInt("output_volume", WAKE_VOLUME);
     }
 
     virtual Led* GetLed() override {
