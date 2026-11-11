@@ -11,6 +11,9 @@
 #include <driver/gpio.h>
 #include <lvgl.h>
 #include <esp_lvgl_port.h>
+#include <esp_wifi.h>
+#include <esp_timer.h>
+#include <esp_system.h>
 
 #define TAG "SoftToyS3Zero"
 
@@ -20,6 +23,12 @@ class SoftToyS3ZeroBoard : public WifiBoard {
 private:
     Button boot_button_;
     Button assist_button_;
+
+    // WiFi-liveness watchdog state (see StartWifiWatchdog).
+    esp_timer_handle_t wifi_watchdog_timer_ = nullptr;
+    int64_t last_wifi_ok_us_ = 0;
+    static constexpr int64_t kWifiWatchdogCheckUs = 30LL * 1000000;      // check every 30 s
+    static constexpr int64_t kWifiDownRebootUs    = 5LL * 60 * 1000000;  // reboot after 5 min down
 
     // MAX98357A SD pin: drive HIGH to enable output (HIGH also selects the LEFT I2S slot).
     // NoAudioCodecSimplex has no PA-enable parameter, so the amp is enabled here and left on.
@@ -79,6 +88,7 @@ public:
         InitializeAmplifier();
         InitializeButtons();
         InitializeWakeVolume();
+        StartWifiWatchdog();
     }
 
     // Wake-volume policy (2026-11-10): the toy always powers on quiet, and although the
@@ -96,6 +106,45 @@ public:
     void InitializeWakeVolume() {
         Settings settings("audio", true);
         settings.SetInt("output_volume", WAKE_VOLUME);
+    }
+
+    // Minimal WiFi-liveness watchdog. The stock app already returns to idle on a dropped
+    // conversation and WiFi retries on its own, but nothing recovers a WiFi link that never
+    // comes back: the toy would sit idle and unreachable with no one to power-cycle it. A
+    // periodic timer checks STA association; if it stays disconnected for kWifiDownRebootUs
+    // (5 min), it reboots to recover. It resets the clock during startup and SoftAP
+    // provisioning (STA is legitimately not connected then), so it never reboots mid-setup.
+    void StartWifiWatchdog() {
+        last_wifi_ok_us_ = esp_timer_get_time();  // grace period from boot
+        esp_timer_create_args_t args = {};
+        args.callback = [](void* arg) {
+            static_cast<SoftToyS3ZeroBoard*>(arg)->CheckWifiLiveness();
+        };
+        args.arg = this;
+        args.dispatch_method = ESP_TIMER_TASK;
+        args.name = "wifi_wdt";
+        if (esp_timer_create(&args, &wifi_watchdog_timer_) == ESP_OK) {
+            esp_timer_start_periodic(wifi_watchdog_timer_, kWifiWatchdogCheckUs);
+        }
+    }
+
+    void CheckWifiLiveness() {
+        auto state = Application::GetInstance().GetDeviceState();
+        if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {
+            last_wifi_ok_us_ = esp_timer_get_time();  // don't count while booting/provisioning
+            return;
+        }
+        wifi_ap_record_t ap_info;
+        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            last_wifi_ok_us_ = esp_timer_get_time();  // associated -> healthy
+            return;
+        }
+        int64_t down_us = esp_timer_get_time() - last_wifi_ok_us_;
+        if (down_us >= kWifiDownRebootUs) {
+            ESP_LOGW(TAG, "WiFi down for %lld s, rebooting to recover",
+                     (long long)(down_us / 1000000));
+            esp_restart();
+        }
     }
 
     virtual Led* GetLed() override {
