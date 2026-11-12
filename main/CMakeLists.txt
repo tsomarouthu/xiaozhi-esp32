@@ -1064,6 +1064,19 @@ endif()
 
 file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)
 
+# Board-local sounds: boards/<board>/sounds/<lang>/*.ogg, falling back to en-US when the
+# build language has no folder. Embedded like the stock sounds, so the board can play them
+# with no network (used by softtoy-s3zero for its offline status clips). File names must
+# not clash with stock sounds: the embed symbol is _binary_<name>_ogg_start.
+set(BOARD_SOUNDS "")
+set(BOARD_SOUNDS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_DIR}/sounds)
+if(EXISTS ${BOARD_SOUNDS_DIR}/${LANG_DIR})
+    file(GLOB BOARD_SOUNDS ${BOARD_SOUNDS_DIR}/${LANG_DIR}/*.ogg)
+elseif(EXISTS ${BOARD_SOUNDS_DIR}/en-US)
+    file(GLOB BOARD_SOUNDS ${BOARD_SOUNDS_DIR}/en-US/*.ogg)
+    message(STATUS "Board sounds: no ${LANG_DIR} folder, using en-US")
+endif()
+
 # If target chip is ESP32, exclude specific files to avoid build errors
 if(CONFIG_IDF_TARGET_ESP32)
     list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
@@ -1122,7 +1135,7 @@ if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
     )
 endif()
 idf_component_register(SRCS ${SOURCES}
-                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
+                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${BOARD_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES

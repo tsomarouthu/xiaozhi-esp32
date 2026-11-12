@@ -121,7 +121,16 @@ void RgbSingleLed::OnBlinkTimer() {
 }
 
 
+void RgbSingleLed::SetOverrideColor(uint8_t r, uint8_t g, uint8_t b) {
+    override_ = true;
+    SetColor(r, g, b);
+    TurnOn();
+}
+
 void RgbSingleLed::OnStateChanged() {
+    if (override_) {
+        return;  // a board cue (e.g. "let go now, restarting") owns the LED until reboot
+    }
     auto& app = Application::GetInstance();
     auto device_state = app.GetDeviceState();
     switch (device_state) {

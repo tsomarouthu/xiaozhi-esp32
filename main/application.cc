@@ -752,12 +752,14 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
 void Application::Alert(const char* status, const char* message, const char* emotion,
                         const std::string_view& sound) {
     ESP_LOGW(TAG, "Alert [%s] %s: %s", emotion, status, message);
-    auto display = Board::GetInstance().GetDisplay();
+    auto& board = Board::GetInstance();
+    auto display = board.GetDisplay();
     display->SetStatus(status);
     display->SetEmotion(emotion);
     display->SetChatMessage("system", message);
-    if (!sound.empty()) {
-        audio_service_.PlaySound(sound);
+    auto alert_sound = board.GetAlertSound(status, message, emotion, sound);
+    if (!alert_sound.empty()) {
+        audio_service_.PlaySound(alert_sound);
     }
 }
 

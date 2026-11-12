@@ -6,6 +6,7 @@
 #include <mqtt.h>
 #include <udp.h>
 #include <string>
+#include <string_view>
 #include <functional>
 #include <network_interface.h>
 
@@ -82,6 +83,15 @@ public:
     virtual void SetPowerSaveLevel(PowerSaveLevel level) = 0;
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+
+    // Lets a board replace or mute the sound of an Application::Alert(): return `sound`
+    // unchanged (default), another embedded OGG, or an empty view for silence. Used by
+    // headless boards that need to *say* a status the display would otherwise show.
+    virtual std::string_view GetAlertSound(const char* status, const char* message,
+                                           const char* emotion, std::string_view sound) {
+        (void)status; (void)message; (void)emotion;
+        return sound;
+    }
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

@@ -6,6 +6,8 @@
 #include "config.h"
 #include "rgb_single_led.h"
 #include "settings.h"
+#include "assets/lang_config.h"
+#include "ssid_manager.h"
 
 #include <esp_log.h>
 #include <driver/gpio.h>
@@ -14,13 +16,31 @@
 #include <esp_wifi.h>
 #include <esp_timer.h>
 #include <esp_system.h>
+#include <atomic>
+#include <cstring>
+#include <string_view>
 
 #define TAG "SoftToyS3Zero"
+
+// Offline status clips, spoken in the toy's own voice with no server. Embedded from
+// sounds/<lang>/ by main/CMakeLists.txt (BOARD_SOUNDS); rendered by offline_clips/ in the
+// softToy repo. See docs/features/feature_offline-mode.md.
+extern const char st_offline_wifi_start[] asm("_binary_st_offline_wifi_ogg_start");
+extern const char st_offline_wifi_end[] asm("_binary_st_offline_wifi_ogg_end");
+extern const char st_offline_server_start[] asm("_binary_st_offline_server_ogg_start");
+extern const char st_offline_server_end[] asm("_binary_st_offline_server_ogg_end");
+static const std::string_view OGG_ST_OFFLINE_WIFI{
+    st_offline_wifi_start, static_cast<size_t>(st_offline_wifi_end - st_offline_wifi_start)};
+static const std::string_view OGG_ST_OFFLINE_SERVER{
+    st_offline_server_start, static_cast<size_t>(st_offline_server_end - st_offline_server_start)};
 
 // SoftToy S3-Zero: Waveshare ESP32-S3-Zero (N8R8) + INMP441 mic + MAX98357A amp.
 // No display. Simplex I2S (separate mic and amp buses), no external codec.
 class SoftToyS3ZeroBoard : public WifiBoard {
 private:
+    // Hold push-to-talk this long to restart the toy (the child's own "fix it" gesture).
+    static constexpr uint16_t kRestartHoldMs = 5000;
+
     Button boot_button_;
     Button assist_button_;
 
@@ -29,6 +49,49 @@ private:
     int64_t last_wifi_ok_us_ = 0;
     static constexpr int64_t kWifiWatchdogCheckUs = 30LL * 1000000;      // check every 30 s
     static constexpr int64_t kWifiDownRebootUs    = 5LL * 60 * 1000000;  // reboot after 5 min down
+
+    // Setup-mode timeout (see CheckWifiLiveness). The stock firmware falls into the SoftAP
+    // setup mode when saved Wi-Fi isn't found within 60 s of boot, and then stays there for
+    // good; out of range (car, garden) that means a toy that never comes back by itself.
+    int64_t config_idle_since_us_ = 0;   // 0 = not in setup mode
+    static constexpr int64_t kAutoConfigRebootUs = 3LL * 60 * 1000000;    // fell in by itself
+    static constexpr int64_t kUserConfigRebootUs = 10LL * 60 * 1000000;   // parent pressed BOOT
+    std::atomic<bool> config_requested_{false};  // setup mode was asked for via BOOT
+
+    // Push-to-talk state.
+    std::atomic<bool> restart_armed_{false};     // held >= kRestartHoldMs: restart on release
+    std::atomic<bool> ptt_swallowed_{false};     // press answered with a clip, not a turn
+
+    // Offline clip rate limit: speak at most once per window, the short beep in between,
+    // so a child pressing repeatedly isn't lectured every time.
+    std::atomic<int64_t> last_offline_clip_us_{0};
+    static constexpr int64_t kOfflineClipRepeatUs = 2LL * 60 * 1000000;
+
+    static bool HasSavedWifi() {
+        return !SsidManager::GetInstance().GetSsidList().empty();
+    }
+
+    static bool WifiAssociated() {
+        wifi_ap_record_t ap_info;
+        return esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK;
+    }
+
+    static bool StartsWith(const char* text, const char* prefix) {
+        return text != nullptr && strncmp(text, prefix, strlen(prefix)) == 0;
+    }
+
+    // Setup mode that the toy fell into on its own (home Wi-Fi not found), as opposed to
+    // a parent deliberately setting up a network or a brand-new toy with none saved.
+    bool InAutomaticSetupMode() const {
+        auto state = Application::GetInstance().GetDeviceState();
+        return (state == kDeviceStateWifiConfiguring || state == kDeviceStateAudioTesting) &&
+               !config_requested_ && HasSavedWifi();
+    }
+
+    // Which clip explains why the toy can't talk: Wi-Fi itself, or the server behind it.
+    static std::string_view OfflineClip() {
+        return WifiAssociated() ? OGG_ST_OFFLINE_SERVER : OGG_ST_OFFLINE_WIFI;
+    }
 
     // MAX98357A SD pin: drive HIGH to enable output (HIGH also selects the LEFT I2S slot).
     // NoAudioCodecSimplex has no PA-enable parameter, so the amp is enabled here and left on.
@@ -65,25 +128,53 @@ private:
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
+                config_requested_ = true;   // a person asked for setup: longer timeout, chime on
                 EnterWifiConfigMode();
                 return;
             }
             app.ToggleChatState();
         });
 
-        // Tactile button on GPIO11: push-to-talk (hold to listen, release to send).
+        // Tactile push-to-talk button (GPIO18): press = listen, release = send.
+        // Held for kRestartHoldMs: the LED turns white ("let go now") and releasing restarts
+        // the toy. Restart happens on *release*, so a stuck or shorted button can't boot-loop.
         assist_button_.OnPressDown([this]() {
-            Application::GetInstance().StartListening();
+            auto& app = Application::GetInstance();
+            if (InAutomaticSetupMode()) {
+                // Stock behaviour here is the mic echo test, which looks like "working" to a
+                // child but can't talk. Explain instead; hold-to-restart still works.
+                ptt_swallowed_ = true;
+                app.Schedule([]() { Application::GetInstance().PlaySound(OGG_ST_OFFLINE_WIFI); });
+                return;
+            }
+            app.StartListening();
+        });
+        assist_button_.OnLongPress([this]() {
+            ESP_LOGW(TAG, "Push-to-talk held %u ms: release to restart", kRestartHoldMs);
+            restart_armed_ = true;
+            StatusLed().SetOverrideColor(16, 16, 16);   // white = let go now
         });
         assist_button_.OnPressUp([this]() {
+            if (restart_armed_) {
+                ESP_LOGW(TAG, "Restart requested by push-to-talk hold");
+                esp_restart();
+            }
+            if (ptt_swallowed_.exchange(false)) {
+                return;
+            }
             Application::GetInstance().StopListening();
         });
+    }
+
+    static RgbSingleLed& StatusLed() {
+        static RgbSingleLed led(BUILTIN_LED_GPIO);
+        return led;
     }
 
 public:
     SoftToyS3ZeroBoard() :
         boot_button_(BOOT_BUTTON_GPIO),
-        assist_button_(ASSIST_BUTTON_GPIO) {
+        assist_button_(ASSIST_BUTTON_GPIO, false, kRestartHoldMs) {
         InitializeLvglHeadless();
         InitializeAmplifier();
         InitializeButtons();
@@ -113,7 +204,12 @@ public:
     // comes back: the toy would sit idle and unreachable with no one to power-cycle it. A
     // periodic timer checks STA association; if it stays disconnected for kWifiDownRebootUs
     // (5 min), it reboots to recover. It resets the clock during startup and SoftAP
-    // provisioning (STA is legitimately not connected then), so it never reboots mid-setup.
+    // provisioning (STA is legitimately not connected then).
+    //
+    // Setup mode gets its own timeout: if a home network is saved and no phone is connected
+    // to the setup hotspot, reboot after kAutoConfigRebootUs (3 min) so the toy goes back to
+    // looking for home Wi-Fi; kUserConfigRebootUs (10 min) if a parent asked for setup via
+    // BOOT. A phone on the hotspot holds it open; with no saved network it never times out.
     void StartWifiWatchdog() {
         last_wifi_ok_us_ = esp_timer_get_time();  // grace period from boot
         esp_timer_create_args_t args = {};
@@ -130,16 +226,22 @@ public:
 
     void CheckWifiLiveness() {
         auto state = Application::GetInstance().GetDeviceState();
-        if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {
-            last_wifi_ok_us_ = esp_timer_get_time();  // don't count while booting/provisioning
+        int64_t now = esp_timer_get_time();
+        if (state == kDeviceStateWifiConfiguring || state == kDeviceStateAudioTesting) {
+            last_wifi_ok_us_ = now;  // the 5-min Wi-Fi-down rule doesn't apply in setup mode
+            CheckSetupModeTimeout(now);
             return;
         }
-        wifi_ap_record_t ap_info;
-        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-            last_wifi_ok_us_ = esp_timer_get_time();  // associated -> healthy
+        config_idle_since_us_ = 0;
+        if (state == kDeviceStateStarting) {
+            last_wifi_ok_us_ = now;  // don't count while booting
             return;
         }
-        int64_t down_us = esp_timer_get_time() - last_wifi_ok_us_;
+        if (WifiAssociated()) {
+            last_wifi_ok_us_ = now;  // associated -> healthy
+            return;
+        }
+        int64_t down_us = now - last_wifi_ok_us_;
         if (down_us >= kWifiDownRebootUs) {
             ESP_LOGW(TAG, "WiFi down for %lld s, rebooting to recover",
                      (long long)(down_us / 1000000));
@@ -147,9 +249,51 @@ public:
         }
     }
 
+    void CheckSetupModeTimeout(int64_t now) {
+        wifi_sta_list_t stations = {};
+        bool phone_connected = esp_wifi_ap_get_sta_list(&stations) == ESP_OK && stations.num > 0;
+        if (!HasSavedWifi() || phone_connected || config_idle_since_us_ == 0) {
+            config_idle_since_us_ = now;  // nothing to go back to, someone is setting up, or just entered
+            return;
+        }
+        int64_t limit_us = config_requested_ ? kUserConfigRebootUs : kAutoConfigRebootUs;
+        int64_t idle_us = now - config_idle_since_us_;
+        if (idle_us >= limit_us) {
+            ESP_LOGW(TAG, "Setup mode idle for %lld s with home Wi-Fi saved, rebooting to retry it",
+                     (long long)(idle_us / 1000000));
+            esp_restart();
+        }
+    }
+
     virtual Led* GetLed() override {
-        static RgbSingleLed led(BUILTIN_LED_GPIO);
-        return &led;
+        return &StatusLed();
+    }
+
+    // Headless toy: say *why* it can't talk instead of the generic exclamation beep, and keep
+    // the setup-mode chime quiet when the toy only fell into setup mode by itself (otherwise
+    // it would chime every ~4 min on a car trip). Everything else keeps its stock sound.
+    virtual std::string_view GetAlertSound(const char* status, const char* message,
+                                           const char* emotion, std::string_view sound) override {
+        (void)status;
+        if (strcmp(emotion, "gear") == 0) {   // "Wi-Fi configuration mode" alert
+            return (!config_requested_ && HasSavedWifi()) ? std::string_view{} : sound;
+        }
+        bool offline =
+            strcmp(emotion, "cloud_off") == 0 ||   // OTA/version check failed: server unreachable
+            (strcmp(emotion, "cancel") == 0 &&     // talk attempt failed to reach the server
+             (StartsWith(message, Lang::Strings::SERVER_NOT_CONNECTED) ||
+              StartsWith(message, Lang::Strings::SERVER_TIMEOUT) ||
+              StartsWith(message, Lang::Strings::SERVER_ERROR)));
+        if (!offline) {
+            return sound;   // e.g. firmware upgrade failed: keep the stock beep
+        }
+        int64_t now = esp_timer_get_time();
+        int64_t last = last_offline_clip_us_;
+        if (last != 0 && now - last < kOfflineClipRepeatUs) {
+            return sound;   // said it recently: just the beep
+        }
+        last_offline_clip_us_ = now;
+        return OfflineClip();
     }
 
     virtual AudioCodec* GetAudioCodec() override {

@@ -28,6 +28,7 @@
 
 // Buttons (both wired to GND, internal pull-up, active low).
 #define BOOT_BUTTON_GPIO         GPIO_NUM_0    // onboard BOOT: Wi-Fi config / toggle chat
-#define ASSIST_BUTTON_GPIO       GPIO_NUM_11   // tactile button: push-to-talk
+#define ASSIST_BUTTON_GPIO       GPIO_NUM_18   // tactile button: push-to-talk; hold 5 s = restart
+                                               // (final map, docs/wiring.md; was GPIO11 on the bench)
 
 #endif // _BOARD_CONFIG_H_

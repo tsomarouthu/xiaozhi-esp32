@@ -23,7 +23,13 @@ public:
 
     void OnStateChanged() override;
 
+    // Lock the LED to one solid colour and ignore further device-state changes.
+    // Used as the "you held long enough, let go" cue before a restart; there is no
+    // unlock because the next thing that happens is esp_restart().
+    void SetOverrideColor(uint8_t r, uint8_t g, uint8_t b);
+
 private:
+    std::atomic<bool> override_{false};
     std::mutex mutex_;
     TaskHandle_t blink_task_ = nullptr;
     led_strip_handle_t led_strip_ = nullptr;
