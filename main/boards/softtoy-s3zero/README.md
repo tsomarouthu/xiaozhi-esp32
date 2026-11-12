@@ -49,6 +49,14 @@ python scripts/build.py softtoy-s3zero --language en-US --wake-word nihaoxiaozhi
 idf.py -p COM4 flash
 ```
 
-`config.json` applies 8 MB flash, `partitions/v2/8m.csv` (two OTA slots), and octal PSRAM.
+`config.json` applies 8 MB flash, the board-local `partitions_8m_factory.csv`, and octal PSRAM.
+The table has two OTA slots of 0x2f0000 each (unchanged), a 1 MB `rescue` slot (app subtype
+`test`) at 0x600000 for the softToy repo's `recovery_app/`, and 1 MB assets at 0x700000. The
+bootloader starts the recovery app when push-to-talk is held for 5 s at power-up
+(`CONFIG_BOOTLOADER_APP_TEST`, GPIO18), or when no OTA slot holds a loadable app (M8a, 2026-11-12).
+A toy moves to this layout only by USB install (softToy `docs/ONBOARD-CHECKLIST.md`, M8a).
+`idf.py flash` still writes xiaozhi to `ota_0` and the assets to 0x700000, but not the recovery app.
+The build prints `Warning: 1/3 app partitions are too small ... 'rescue'`. That's expected:
+xiaozhi only has to fit the OTA slots.
 Firmware version is `PROJECT_VER` in the repo-root `CMakeLists.txt`; the OTA model key is
 `board.type` = `softtoy-s3zero` (server looks for `data/bin/softtoy-s3zero_<version>.bin`).

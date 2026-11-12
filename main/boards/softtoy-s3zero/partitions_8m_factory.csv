@@ -1,0 +1,23 @@
+# SoftToy S3-Zero: 8 MB layout with a recovery app slot (M8a, 2026-11-12).
+# Board-local copy of partitions/v2/8m.csv (the shared table is not edited).
+# Same as 8m.csv except: assets shrinks 2 MB -> 1 MB and moves to 0x700000, and the freed
+# 1 MB at 0x600000 holds recovery_app/ (softToy repo).
+#  - nvs / otadata / phy_init: same offsets and sizes, so saved Wi-Fi in NVS survives.
+#  - ota_0 / ota_1: same offsets and sizes (0x2f0000 each), so xiaozhi images keep their slots.
+#  - rescue: the recovery app. App subtype "test", not "factory": with a factory slot, ESP-IDF's
+#    build puts the project app into it (flash/merge-bin use --partition-boot-default), i.e. the
+#    2.4 MB xiaozhi image at 0x600000 over the assets. A test slot leaves xiaozhi on ota_0. The
+#    label isn't "recovery" because that is a reserved data-subtype name (gen_esp32part warns). The
+#    bootloader starts it when push-to-talk (GPIO18) is held for 5 s at power-up
+#    (CONFIG_BOOTLOADER_APP_TEST in config.json) and when no OTA slot holds a loadable app.
+#  - assets: found by label at runtime (main/assets.cc); the build checks it fits 1 MB.
+# Changing this table needs a USB install (docs/ONBOARD-CHECKLIST.md, M8a).
+# recovery_app/ builds with this same file.
+# Name,   Type, SubType, Offset,   Size, Flags
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+ota_0,    app,  ota_0,   0x20000,  0x2f0000,
+ota_1,    app,  ota_1,   0x310000, 0x2f0000,
+rescue,   app,  test,    0x600000, 0x100000,
+assets,   data, spiffs,  0x700000, 0x100000,

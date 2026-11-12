@@ -30,6 +30,8 @@
 #define BOOT_BUTTON_GPIO         GPIO_NUM_0    // onboard BOOT: Wi-Fi config / toggle chat
 #define ASSIST_BUTTON_GPIO       GPIO_NUM_18   // tactile button: push-to-talk; hold 5 s = restart
                                                // (final map, docs/wiring.md; was GPIO11 on the bench)
+                                               // Also in config.json (CONFIG_BOOTLOADER_NUM_PIN_APP_TEST:
+                                               // held 5 s at boot = recovery app) and recovery_app/.
 
 // Shared I2C bus (DRV2605L haptics 0x5A + LIS3DH accelerometer 0x19). Pull-ups are on the
 // breakouts, so the ESP32's internal pull-ups stay off. See docs/wiring.md "I2C bus".
