@@ -79,20 +79,32 @@ void Haptics::Giggle()    { Enqueue(Cmd::kGiggle, false); }
 void Haptics::Heartbeat() { Enqueue(Cmd::kHeartbeat, false); }
 void Haptics::Wiggle()    { Enqueue(Cmd::kWiggle, false); }
 
-void Haptics::Purr(bool on) {
+void Haptics::Purr(bool on, PurrOwner owner) {
     if (!available_) return;
-    if (!on) {
-        purr_wanted_ = false;   // always honoured; the task aborts within ~10 ms
+    const uint8_t bit = static_cast<uint8_t>(owner);
+    const uint8_t keep = static_cast<uint8_t>(~bit);
+    const uint8_t owners = on ? static_cast<uint8_t>(purr_owners_.fetch_or(bit) | bit)
+                              : static_cast<uint8_t>(purr_owners_.fetch_and(keep) & keep);
+    if (owners == 0) {
+        purr_wanted_ = false;   // no owner left: the task aborts within ~10 ms
         return;
     }
-    if (!MotorAllowed()) return;               // dropped: mic is capturing
+    if (!on) return;                           // another owner still wants it: keep purring
+    if (!MotorAllowed()) {                     // dropped: mic is capturing
+        purr_owners_.fetch_and(keep);
+        return;
+    }
     if (purr_wanted_.exchange(true)) return;   // already purring
-    if (!Enqueue(Cmd::kPurr, false)) purr_wanted_ = false;
+    if (!Enqueue(Cmd::kPurr, false)) {
+        purr_wanted_ = false;
+        purr_owners_.fetch_and(keep);
+    }
 }
 
 void Haptics::BuzzListenStart() {
     if (!available_) return;
     purr_wanted_ = false;
+    purr_owners_ = 0;   // Listening cuts the purr for every owner
     edge_start_cancel_ = false;
     xSemaphoreTake(edge_done_, 0);   // clear a stale give
     if (!Enqueue(Cmd::kEdgeStart, true)) return;

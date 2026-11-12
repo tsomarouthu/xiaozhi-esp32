@@ -35,7 +35,11 @@ public:
 
     // Effects (gated by MotorAllowed(); dropped otherwise).
     void Buzz();                // short click: touch buzz-back, pick-up, reward
-    void Purr(bool on);         // soft repeating pattern until Purr(false); off is always honoured
+    // Purr has two owners that can both want it (M2 speaking purr, M5 hug purr). It runs while at
+    // least one owner wants it and stops when none does; off is always honoured. Listening cuts it
+    // and clears every owner (the mic gate), so a hug purr does not resume after a turn.
+    enum class PurrOwner : uint8_t { kSpeaking = 1, kHug = 2 };
+    void Purr(bool on, PurrOwner owner = PurrOwner::kSpeaking);
     void Giggle();              // three quick double-clicks: foot tickle
     void Heartbeat();           // lub-dub: bedtime / calm
     void Wiggle();              // excited pulsing: homecoming / shake
@@ -67,6 +71,7 @@ private:
     std::atomic<int> pending_{0};
     std::atomic<bool> purring_{false};
     std::atomic<bool> purr_wanted_{false};
+    std::atomic<uint8_t> purr_owners_{0};   // bitmask of PurrOwner
     std::atomic<bool> edge_start_cancel_{false};
     std::atomic<int64_t> last_active_us_{0};
     void* drv_ = nullptr;   // Drv2605l*, owned by the task

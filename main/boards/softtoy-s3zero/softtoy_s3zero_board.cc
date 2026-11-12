@@ -10,6 +10,7 @@
 #include "lis3dh.h"
 #include "markers.h"
 #include "touch_pads.h"
+#include "hug.h"
 #include "settings.h"
 #include "assets/lang_config.h"
 #include "ssid_manager.h"
@@ -187,6 +188,7 @@ private:
         Markers::Init([this]() { return IsOnline(); });
         Lis3dh::GetInstance().Init(i2c_bus_);
         TouchPads::Init();   // M4: needs Haptics + Markers; a failure only disables touch
+        Hug::Init();         // M5: belly + held -> purr + [hug]
     }
 
     void InitializeButtons() {
