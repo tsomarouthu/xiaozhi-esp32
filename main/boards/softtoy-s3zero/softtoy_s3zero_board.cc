@@ -7,6 +7,8 @@
 #include "rgb_single_led.h"
 #include "softtoy_i2c.h"
 #include "haptics.h"
+#include "lis3dh.h"
+#include "markers.h"
 #include "settings.h"
 #include "assets/lang_config.h"
 #include "ssid_manager.h"
@@ -62,6 +64,7 @@ public:
         } else if (prev_ == kDeviceStateSpeaking) {
             haptics.Purr(false);
         }
+        Markers::NoteDeviceState(state);   // for "no pick-up within 10 min after a session"
         prev_ = state;
     }
 private:
@@ -97,6 +100,13 @@ private:
     // Push-to-talk state.
     std::atomic<bool> restart_armed_{false};     // held >= kRestartHoldMs: restart on release
     std::atomic<bool> ptt_swallowed_{false};     // press answered with a clip, not a turn
+    std::atomic<bool> ptt_marker_started_{false};  // press began a [wake: button] session: swallow the release
+
+    // Server-down memory for Markers' "online?" check. The server is only ever noticed as
+    // unreachable when a talk attempt or the OTA check fails; that alert (see GetAlertSound) sets
+    // this, and for the next kServerDownMemoryUs start-a-session markers count as offline.
+    std::atomic<int64_t> server_down_until_us_{0};
+    static constexpr int64_t kServerDownMemoryUs = 60LL * 1000000;
 
     // Offline clip rate limit: speak at most once per window, the short beep in between,
     // so a child pressing repeatedly isn't lectured every time.
@@ -159,11 +169,22 @@ private:
         lvgl_port_init(&port_cfg);
     }
 
-    // One shared I2C bus (GPIO15/16) for the DRV2605L and, from M3, the LIS3DH. Logs a bus scan.
+    // "Can the toy reach the server right now?" for Markers (offline -> M6's local clips).
+    // Cheapest reliable check that already exists: Wi-Fi associated (as the offline status clips
+    // use) and no recent server-unreachable alert. In a live session (Listening) it is obviously up.
+    bool IsOnline() {
+        if (Application::GetInstance().GetDeviceState() == kDeviceStateListening) return true;
+        if (!WifiAssociated()) return false;
+        return esp_timer_get_time() >= server_down_until_us_.load();
+    }
+
+    // One shared I2C bus (GPIO15/16) for the DRV2605L and the LIS3DH. Logs a bus scan.
     // A missing device only disables that feature; it never blocks boot.
     void InitializeI2cAndHaptics() {
         i2c_bus_ = SoftToyI2c::Init();
         Haptics::GetInstance().Init(i2c_bus_);
+        Markers::Init([this]() { return IsOnline(); });
+        Lis3dh::GetInstance().Init(i2c_bus_);
     }
 
     void InitializeButtons() {
@@ -190,7 +211,18 @@ private:
                 app.Schedule([]() { Application::GetInstance().PlaySound(OGG_ST_OFFLINE_WIFI); });
                 return;
             }
-            app.StartListening();
+            // No session open: send [wake: button] and start one (the toy speaks first, then the
+            // conversation continues hands-free) and swallow the matching release. Session already
+            // open / speaking / anything else: the app rejects it and the press is plain
+            // push-to-talk as before. The decision runs on the main task; the release below is
+            // scheduled too, so it is always ordered after it.
+            Markers::Request(Markers::Id::kWakeButton, [this](bool accepted) {
+                if (accepted) {
+                    ptt_marker_started_ = true;
+                } else {
+                    Application::GetInstance().StartListening();
+                }
+            });
         });
         assist_button_.OnLongPress([this]() {
             ESP_LOGW(TAG, "Push-to-talk held %u ms: release to restart", kRestartHoldMs);
@@ -205,7 +237,12 @@ private:
             if (ptt_swallowed_.exchange(false)) {
                 return;
             }
-            Application::GetInstance().StopListening();
+            Application::GetInstance().Schedule([this]() {
+                if (ptt_marker_started_.exchange(false)) {
+                    return;   // the press started a [wake: button] session: nothing to stop
+                }
+                Application::GetInstance().StopListening();
+            });
         });
     }
 
@@ -333,6 +370,9 @@ public:
             return sound;   // e.g. firmware upgrade failed: keep the stock beep
         }
         int64_t now = esp_timer_get_time();
+        if (WifiAssociated()) {
+            server_down_until_us_ = now + kServerDownMemoryUs;   // Wi-Fi is up, so it's the server
+        }
         int64_t last = last_offline_clip_us_;
         if (last != 0 && now - last < kOfflineClipRepeatUs) {
             return sound;   // said it recently: just the beep

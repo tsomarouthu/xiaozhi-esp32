@@ -44,6 +44,13 @@ enum AecMode {
     kAecOnServerSide,
 };
 
+// SoftToy: where SendEventMarker() may send a marker. See Application::SendEventMarker.
+enum class MarkerStart {
+    kInSessionOnly,      // only into an open session; never opens one
+    kStartOnly,          // only opens a new session (idle, channel closed); dropped in a session
+    kStartOrInSession,   // either of the above
+};
+
 class Application {
 public:
     static Application& GetInstance() {
@@ -110,6 +117,19 @@ public:
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
+
+    /**
+     * SoftToy hook (nothing in stock code calls it). Sends a short text event marker (touch,
+     * motion, button...) to the server the way a wake word is sent, but without uploading
+     * wake-word audio, and without ending or interrupting a session the way WakeWordInvoke
+     * does. Thread-safe: callable from any task; decides and sends on the main task.
+     * Dropped (never queued) while Speaking, Connecting, Notifying, in setup/upgrade, or in
+     * push-to-talk (ManualStop) listening. done(accepted) runs on the main task: true only if
+     * the marker was sent or a new session was begun with it. The marker must be ASCII with
+     * no '"' or '\' (it is pasted into JSON unescaped).
+     */
+    void SendEventMarker(const std::string& marker, MarkerStart start,
+                         std::function<void(bool accepted)> done = nullptr);
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
@@ -167,6 +187,7 @@ private:
     void ContinueOpenAudioChannel(ListeningMode mode);
     void BeginWakeWordInvoke(const std::string& wake_word);
     void ContinueWakeWordInvoke(const std::string& wake_word);
+    bool HandleEventMarker(const std::string& marker, MarkerStart start);
     void StartListeningAudio();
     void ConfigureWakeWordForListening();
     void StartNotification(std::string audio_url, std::vector<NotifySubtitle> subtitles);

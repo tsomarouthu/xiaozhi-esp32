@@ -1299,6 +1299,74 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     }
 }
 
+// SoftToy hook, see application.h. Runs on the main task.
+void Application::SendEventMarker(const std::string& marker, MarkerStart start,
+                                  std::function<void(bool accepted)> done) {
+    Schedule([this, marker, start, done = std::move(done)]() {
+        bool accepted = HandleEventMarker(marker, start);
+        if (done) {
+            done(accepted);
+        }
+    });
+}
+
+bool Application::HandleEventMarker(const std::string& marker, MarkerStart start) {
+    if (!protocol_) {
+        return false;
+    }
+    auto state = GetDeviceState();
+    // "In a session": Listening (but never push-to-talk ManualStop: the server's `detect`
+    // handler would throw away what the child is saying), or Idle with the channel still open
+    // (between push-to-talk turns). Speaking, Connecting, Notifying, setup, upgrade: dropped.
+    bool in_session = false;
+    bool can_start = false;
+    if (state == kDeviceStateListening) {
+        if (listening_mode_ == kListeningModeManualStop) {
+            return false;
+        }
+        in_session = true;
+    } else if (state == kDeviceStateIdle) {
+        in_session = protocol_->IsAudioChannelOpened();
+        can_start = !in_session;
+    } else {
+        return false;
+    }
+
+    if (in_session) {
+        if (start == MarkerStart::kStartOnly) {
+            return false;
+        }
+        ESP_LOGI(TAG, "Event marker (in session): %s", marker.c_str());
+        protocol_->SendWakeWordDetected(marker);
+        if (state == kDeviceStateIdle) {
+            SetListeningMode(GetDefaultListeningMode());
+        }
+        return true;
+    }
+    if (!can_start || start == MarkerStart::kInSessionOnly) {
+        return false;
+    }
+    // Start a session. Like BeginWakeWordInvoke/ContinueWakeWordInvoke, minus the cached
+    // wake-word audio (there was no wake word; the room audio is not uploaded).
+    if (!SetDeviceState(kDeviceStateConnecting)) {
+        return false;
+    }
+    Schedule([this, marker]() {
+        if (GetDeviceState() != kDeviceStateConnecting) {
+            return;
+        }
+        Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+        if (!protocol_->IsAudioChannelOpened() && !protocol_->OpenAudioChannel()) {
+            SetDeviceState(kDeviceStateIdle);   // the usual offline alert path has run
+            return;
+        }
+        ESP_LOGI(TAG, "Event marker (new session): %s", marker.c_str());
+        protocol_->SendWakeWordDetected(marker);
+        SetListeningMode(GetDefaultListeningMode());
+    });
+    return true;
+}
+
 bool Application::CanEnterSleepMode() {
     if (GetDeviceState() != kDeviceStateIdle) {
         return false;
