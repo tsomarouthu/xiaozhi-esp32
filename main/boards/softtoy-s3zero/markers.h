@@ -53,7 +53,7 @@ void Request(Id id, std::function<void(bool accepted)> done = nullptr);
 void NoteDeviceState(DeviceState state);
 
 // M6 hook: called instead of sending when the toy is offline and the marker passed its rate limit.
-// Empty for now (logs). M6 plays the local clip here and may call Consume(id) when it did.
+// Plays the marker's local reaction clip (reaction_clips.cc) and Consume()s the limits if it did.
 void OnOfflineMarker(Id id);
 
 // Use up `id`'s rate limit and the global gap now (for M6 when it plays an offline clip).

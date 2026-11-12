@@ -11,6 +11,7 @@
 #include "markers.h"
 #include "touch_pads.h"
 #include "hug.h"
+#include "reaction_clips.h"
 #include "settings.h"
 #include "assets/lang_config.h"
 #include "ssid_manager.h"
@@ -88,6 +89,7 @@ private:
     // WiFi-liveness watchdog state (see StartWifiWatchdog).
     esp_timer_handle_t wifi_watchdog_timer_ = nullptr;
     int64_t last_wifi_ok_us_ = 0;
+    bool wifi_was_down_ = false;   // timer task only: STA was seen un-associated (for "Yay, I'm back!")
     static constexpr int64_t kWifiWatchdogCheckUs = 30LL * 1000000;      // check every 30 s
     static constexpr int64_t kWifiDownRebootUs    = 5LL * 60 * 1000000;  // reboot after 5 min down
 
@@ -324,8 +326,14 @@ public:
         }
         if (WifiAssociated()) {
             last_wifi_ok_us_ = now;  // associated -> healthy
+            if (wifi_was_down_) {
+                // Wi-Fi is back after being down: greet once, only if she was told it was offline.
+                wifi_was_down_ = false;
+                ReactionClips::PlayBackOnlineIfDue();
+            }
             return;
         }
+        wifi_was_down_ = true;
         int64_t down_us = now - last_wifi_ok_us_;
         if (down_us >= kWifiDownRebootUs) {
             ESP_LOGW(TAG, "WiFi down for %lld s, rebooting to recover",
@@ -382,6 +390,7 @@ public:
             return sound;   // said it recently: just the beep
         }
         last_offline_clip_us_ = now;
+        ReactionClips::NoteStatusClipSpoken(8000);   // status clips run ~5-7 s: no reaction clip over them
         return OfflineClip();
     }
 

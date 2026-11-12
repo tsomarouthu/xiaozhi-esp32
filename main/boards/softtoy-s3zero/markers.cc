@@ -1,6 +1,7 @@
 #include "markers.h"
 #include "haptics.h"
 #include "application.h"
+#include "reaction_clips.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -106,8 +107,15 @@ void Consume(Id id) {
 }
 
 void OnOfflineMarker(Id id) {
-    // M6: play the marker's local clip here. For now only log.
-    ESP_LOGI(TAG, "offline marker %s (no local clip yet)", kInfo[(size_t)id].text);
+    // M6: play the marker's local clip (random variant) if the device is idle, no other local clip
+    // is playing and the global 20 s reaction limit allows. Only a played clip uses up the
+    // marker's own rate limit and the 3 s global gap.
+    if (ReactionClips::PlayFor(id)) {
+        Consume(id);
+        ESP_LOGI(TAG, "offline marker %s: clip played", kInfo[(size_t)id].text);
+    } else {
+        ESP_LOGI(TAG, "offline marker %s: no clip", kInfo[(size_t)id].text);
+    }
 }
 
 void Request(Id id, std::function<void(bool accepted)> done) {
@@ -147,11 +155,11 @@ void Request(Id id, std::function<void(bool accepted)> done) {
 
     if (online && !online()) {
         // Offline: the limits above were passed, so this marker would have been sent. M6 plays
-        // a local clip. Haptics still fire locally (only for markers that may start a session:
-        // an offline toy is never in a session, and reactions are for an awake toy).
+        // a local clip and, as always, the marker's haptic fires locally (motion markers here;
+        // touch and hug haptics are fired by their own modules). The mic gate is inside Haptics.
         ESP_LOGI(TAG, "marker %s dropped(offline)", info.text);
         OnOfflineMarker(id);
-        if (info.start != MarkerStart::kInSessionOnly) MotionHaptic(id);
+        MotionHaptic(id);
         if (done) done(false);
         return;
     }
