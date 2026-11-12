@@ -5,6 +5,8 @@
 #include "button.h"
 #include "config.h"
 #include "rgb_single_led.h"
+#include "softtoy_i2c.h"
+#include "haptics.h"
 #include "settings.h"
 #include "assets/lang_config.h"
 #include "ssid_manager.h"
@@ -34,6 +36,39 @@ static const std::string_view OGG_ST_OFFLINE_WIFI{
 static const std::string_view OGG_ST_OFFLINE_SERVER{
     st_offline_server_start, static_cast<size_t>(st_offline_server_end - st_offline_server_start)};
 
+// Status LED plus the haptics state hook. xiaozhi calls Led::OnStateChanged() from the main loop
+// on every device-state change (and on VAD changes while Listening), before the state handler
+// starts or stops audio capture, so it is the board's state-change hook. We forward to the RGB LED,
+// then drive the haptics from real state edges only (see Haptics for the mic gate):
+//   -> Listening : tick, finished before capture starts
+//   Listening -> : tick ~80 ms later, after capture has stopped
+//   -> Speaking  : gentle purr until Speaking ends (cut at once if Listening starts)
+class HapticStateLed : public Led {
+public:
+    explicit HapticStateLed(RgbSingleLed& led) : led_(led) {}
+    void OnStateChanged() override {
+        led_.OnStateChanged();
+        DeviceState state = Application::GetInstance().GetDeviceState();
+        if (state == prev_) return;   // VAD-only call: no edge
+        auto& haptics = Haptics::GetInstance();
+        if (state == kDeviceStateListening) {
+            haptics.Purr(false);
+            haptics.BuzzListenStart();
+        } else if (prev_ == kDeviceStateListening) {
+            haptics.BuzzListenEnd();
+        }
+        if (state == kDeviceStateSpeaking) {
+            haptics.Purr(true);
+        } else if (prev_ == kDeviceStateSpeaking) {
+            haptics.Purr(false);
+        }
+        prev_ = state;
+    }
+private:
+    RgbSingleLed& led_;
+    DeviceState prev_ = kDeviceStateUnknown;
+};
+
 // SoftToy S3-Zero: Waveshare ESP32-S3-Zero (N8R8) + INMP441 mic + MAX98357A amp.
 // No display. Simplex I2S (separate mic and amp buses), no external codec.
 class SoftToyS3ZeroBoard : public WifiBoard {
@@ -43,6 +78,7 @@ private:
 
     Button boot_button_;
     Button assist_button_;
+    i2c_master_bus_handle_t i2c_bus_ = nullptr;   // shared bus; also available as SoftToyI2c::Bus()
 
     // WiFi-liveness watchdog state (see StartWifiWatchdog).
     esp_timer_handle_t wifi_watchdog_timer_ = nullptr;
@@ -123,6 +159,13 @@ private:
         lvgl_port_init(&port_cfg);
     }
 
+    // One shared I2C bus (GPIO15/16) for the DRV2605L and, from M3, the LIS3DH. Logs a bus scan.
+    // A missing device only disables that feature; it never blocks boot.
+    void InitializeI2cAndHaptics() {
+        i2c_bus_ = SoftToyI2c::Init();
+        Haptics::GetInstance().Init(i2c_bus_);
+    }
+
     void InitializeButtons() {
         // Onboard BOOT button: enter Wi-Fi config on first boot, otherwise toggle chat.
         boot_button_.OnClick([this]() {
@@ -176,6 +219,7 @@ public:
         boot_button_(BOOT_BUTTON_GPIO),
         assist_button_(ASSIST_BUTTON_GPIO, false, kRestartHoldMs) {
         InitializeLvglHeadless();
+        InitializeI2cAndHaptics();
         InitializeAmplifier();
         InitializeButtons();
         InitializeWakeVolume();
@@ -266,7 +310,8 @@ public:
     }
 
     virtual Led* GetLed() override {
-        return &StatusLed();
+        static HapticStateLed led(StatusLed());
+        return &led;
     }
 
     // Headless toy: say *why* it can't talk instead of the generic exclamation beep, and keep

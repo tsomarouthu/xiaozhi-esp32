@@ -31,4 +31,16 @@
 #define ASSIST_BUTTON_GPIO       GPIO_NUM_18   // tactile button: push-to-talk; hold 5 s = restart
                                                // (final map, docs/wiring.md; was GPIO11 on the bench)
 
+// Shared I2C bus (DRV2605L haptics 0x5A + LIS3DH accelerometer 0x19). Pull-ups are on the
+// breakouts, so the ESP32's internal pull-ups stay off. See docs/wiring.md "I2C bus".
+#define SOFTTOY_I2C_SDA_GPIO     GPIO_NUM_15
+#define SOFTTOY_I2C_SCL_GPIO     GPIO_NUM_16
+#define SOFTTOY_I2C_FREQ_HZ      400000
+#define SOFTTOY_I2C_ADDR_DRV2605L 0x5A
+#define SOFTTOY_I2C_ADDR_LIS3DH   0x19
+
+// Boot haptics self-test: plays each effect once ~300 ms apart right after boot, so the owner
+// can feel them without a trigger. ON for the integration run; set to 0 once checked.
+#define SOFTTOY_HAPTICS_SELFTEST 1
+
 #endif // _BOARD_CONFIG_H_
