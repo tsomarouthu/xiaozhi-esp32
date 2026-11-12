@@ -9,6 +9,7 @@
 #include "haptics.h"
 #include "lis3dh.h"
 #include "markers.h"
+#include "touch_pads.h"
 #include "settings.h"
 #include "assets/lang_config.h"
 #include "ssid_manager.h"
@@ -185,6 +186,7 @@ private:
         Haptics::GetInstance().Init(i2c_bus_);
         Markers::Init([this]() { return IsOnline(); });
         Lis3dh::GetInstance().Init(i2c_bus_);
+        TouchPads::Init();   // M4: needs Haptics + Markers; a failure only disables touch
     }
 
     void InitializeButtons() {

@@ -39,6 +39,15 @@
 #define SOFTTOY_I2C_ADDR_DRV2605L 0x5A
 #define SOFTTOY_I2C_ADDR_LIS3DH   0x19
 
+// Capacitive touch pads, copper tape through 470 ohm each (docs/wiring.md). On the ESP32-S3 the touch
+// channel number equals the GPIO number. Thresholds and debounce live in touch_pads.cc.
+#define SOFTTOY_TOUCH_GPIO_BELLY       1
+#define SOFTTOY_TOUCH_GPIO_RIGHT_HAND  2
+#define SOFTTOY_TOUCH_GPIO_LEFT_FOOT   11
+#define SOFTTOY_TOUCH_GPIO_RIGHT_FOOT  12
+#define SOFTTOY_TOUCH_GPIO_HEAD        13
+#define SOFTTOY_TOUCH_GPIO_TAIL        14
+
 // Boot haptics self-test: plays each effect once ~300 ms apart right after boot, so the owner
 // can feel them without a trigger. ON for the integration run; set to 0 once checked.
 #define SOFTTOY_HAPTICS_SELFTEST 1

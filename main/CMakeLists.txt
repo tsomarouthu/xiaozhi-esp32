@@ -1128,6 +1128,12 @@ if(CONFIG_BOARD_TYPE_ESP_VOCAT AND IDF_VERSION_MAJOR LESS 6)
         espressif__touch_button_sensor
     )
 endif()
+# softtoy-s3zero touch pads (M4). Not conditioned on CONFIG_BOARD_TYPE_*: the component graph is
+# resolved before sdkconfig is loaded. Only compiled in for S3 builds; nothing links it unless used.
+idf_build_get_property(_softtoy_target IDF_TARGET)
+if(_softtoy_target STREQUAL "esp32s3")
+    list(APPEND MAIN_PRIV_REQUIRES_EXTRA esp_driver_touch_sens)
+endif()
 if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
     list(APPEND MAIN_PRIV_REQUIRES_EXTRA
         esp_driver_sdmmc
