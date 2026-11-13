@@ -202,7 +202,17 @@ private:
                 EnterWifiConfigMode();
                 return;
             }
+#if SOFTTOY_BUTTON_ONLY
+            // Mic-less fallback: BOOT is a second paw button. Rejected (e.g. while speaking):
+            // toggle as before, which stops the playback.
+            Markers::Request(Markers::Id::kWakeButton, [](bool accepted) {
+                if (!accepted) {
+                    Application::GetInstance().ToggleChatState();
+                }
+            });
+#else
             app.ToggleChatState();
+#endif
         });
 
         // Tactile push-to-talk button (GPIO18): press = listen, release = send.
@@ -273,14 +283,15 @@ public:
     // child can raise it by voice within a session, it returns to the quiet default on
     // every wake/boot. So we force the NVS "output_volume" key that AudioCodec::Start()
     // reads (stock default 70) back to WAKE_VOLUME each boot. NoAudioCodec volume is
-    // square-law: factor = (vol/100)^2, so dial 14 -> ~0.02 linear (the level settled in
-    // voice_test). The quietest the child can go is dial 10 (~0.01); the louder ceiling is 60.
+    // square-law: factor = (vol/100)^2, so dial 49 -> ~0.24 linear. Raised from 14 (~0.02) on
+    // 2026-11-13: 0.02 was inaudible on board 2's speaker in voice_test, 0.24 judged good by the
+    // owner. The quietest the child can go is dial 10 (~0.01); the louder ceiling is 60 (~0.36).
     //
     // Only the wake default lives here. The step size (+20 per "louder"), the quiet floor
     // (10) and the louder ceiling (60, above which the toy asks the child to have the
     // moderator raise it) live in the server prompt ("the Brain"), so the moderator can
     // change them without reflashing.
-    static constexpr int WAKE_VOLUME = 14;   // 0-100 dial; square-law -> ~0.02 linear (voice_test level)
+    static constexpr int WAKE_VOLUME = 49;   // 0-100 dial; square-law -> ~0.24 linear (voice_test level, board 2)
     void InitializeWakeVolume() {
         Settings settings("audio", true);
         settings.SetInt("output_volume", WAKE_VOLUME);

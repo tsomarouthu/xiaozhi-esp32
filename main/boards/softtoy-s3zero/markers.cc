@@ -2,6 +2,7 @@
 #include "haptics.h"
 #include "application.h"
 #include "reaction_clips.h"
+#include "config.h"
 
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -27,7 +28,11 @@ struct Info {
 
 // Table order = enum Id. Rates and MarkerStart are the M0 conventions (INTEGRATION-PLAN.md).
 const Info kInfo[] = {
+#if SOFTTOY_BUTTON_ONLY
+    {"[wake: button]",        MarkerStart::kStartOrInSession, 0,                 true},   // mic-less: every press replays
+#else
     {"[wake: button]",        MarkerStart::kStartOnly,        0,                 true},
+#endif
     {"[greeting: pickup]",    MarkerStart::kStartOnly,        3 * 3600 * kSecUs, false},
     {"[hug]",                 MarkerStart::kStartOrInSession, 60 * kSecUs,       false},
     {"[touch: right_hand]",   MarkerStart::kInSessionOnly,    10 * kSecUs,       false},

@@ -54,4 +54,10 @@
 // can feel them without a trigger. ON for the integration run; set to 0 once checked.
 #define SOFTTOY_HAPTICS_SELFTEST 1
 
+// Mic-less fallback (2026-11-13, mic not working): every paw press (push-to-talk GPIO18 or the
+// onboard BOOT button) sends [wake: button], even inside a session, so the server's
+// button_only mode (control/birthday.txt) replays the birthday greeting each press. Plain
+// push-to-talk is off. Set to 0 to restore the conversational behaviour once the mic works.
+#define SOFTTOY_BUTTON_ONLY 1
+
 #endif // _BOARD_CONFIG_H_
