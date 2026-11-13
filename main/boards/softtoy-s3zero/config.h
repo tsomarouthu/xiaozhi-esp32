@@ -52,7 +52,7 @@
 
 // Boot haptics self-test: plays each effect once ~300 ms apart right after boot, so the owner
 // can feel them without a trigger. ON for the integration run; set to 0 once checked.
-#define SOFTTOY_HAPTICS_SELFTEST 1
+#define SOFTTOY_HAPTICS_SELFTEST 0   // off for the final build (2026-11-13); its drive pulses ticked the speaker
 
 // Mic-less fallback (2026-11-13, mic not working): every paw press (push-to-talk GPIO18 or the
 // onboard BOOT button) sends [wake: button], even inside a session, so the server's

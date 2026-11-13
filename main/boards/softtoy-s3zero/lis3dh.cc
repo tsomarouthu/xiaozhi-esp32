@@ -16,7 +16,7 @@
 // Print one line every 2 s with x/y/z, the derived values and the detector state, plus one line
 // per impulse (the raw material for tuning hit / double-tap). Set to 0 once tuned.
 #ifndef SOFTTOY_MOTION_CALIB_LOG
-#define SOFTTOY_MOTION_CALIB_LOG 1
+#define SOFTTOY_MOTION_CALIB_LOG 0   // off for the final build (2026-11-13)
 #endif
 
 // ============================ TUNING: every threshold lives here ============================

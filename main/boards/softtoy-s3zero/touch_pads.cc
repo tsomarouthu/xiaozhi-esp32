@@ -16,7 +16,7 @@
 // One log line per pad every 2 s: raw (smoothed) reading, baseline, delta, press threshold and state.
 // This is the calibration tool (docs/ONBOARD-CHECKLIST.md, M4). Set to 0 once the pads are tuned.
 #ifndef SOFTTOY_TOUCH_CALIB_LOG
-#define SOFTTOY_TOUCH_CALIB_LOG 1
+#define SOFTTOY_TOUCH_CALIB_LOG 0    // off for the final build (2026-11-13); pads calibrated in the stuffed toy
 #endif
 
 // ============================ TUNING: every touch constant lives here ============================
@@ -40,18 +40,28 @@ struct PadCfg {
 // Order is only for logs. Start with 3 % everywhere; large pads (belly) usually move more, so
 // the same percentage is easier to hit there. Raise a pad that false-triggers, lower one that
 // needs a hard press.
+// Bench, board 2, before stuffing (2026-11-13): neighbour coupling ~3-4 %; finger on foil gave
+// head +45, tail +44, left foot +39, right foot +33, right hand +12, belly ~+7 %. 3 % caught the
+// coupling, so raised per pad. Re-calibrate in the stuffed toy on the power bank.
 const PadCfg kPads[] = {
-    {SOFTTOY_TOUCH_GPIO_BELLY,      "belly",      Markers::Id::kCount,          30, false, false},
-    {SOFTTOY_TOUCH_GPIO_RIGHT_HAND, "right_hand", Markers::Id::kTouchRightHand, 30, false, true},
-    {SOFTTOY_TOUCH_GPIO_LEFT_FOOT,  "left_foot",  Markers::Id::kTouchLeftFoot,  30, true,  true},
-    {SOFTTOY_TOUCH_GPIO_RIGHT_FOOT, "right_foot", Markers::Id::kTouchRightFoot, 30, true,  true},
-    {SOFTTOY_TOUCH_GPIO_HEAD,       "head",       Markers::Id::kTouchHead,      30, false, true},
-    {SOFTTOY_TOUCH_GPIO_TAIL,       "tail",       Markers::Id::kTouchTail,      30, false, true},
+    {SOFTTOY_TOUCH_GPIO_BELLY,      "belly",      Markers::Id::kCount,          50, false, false},
+    {SOFTTOY_TOUCH_GPIO_RIGHT_HAND, "right_hand", Markers::Id::kTouchRightHand, 70, false, true},
+    {SOFTTOY_TOUCH_GPIO_LEFT_FOOT,  "left_foot",  Markers::Id::kTouchLeftFoot,  80, true,  true},
+    {SOFTTOY_TOUCH_GPIO_RIGHT_FOOT, "right_foot", Markers::Id::kTouchRightFoot, 80, true,  true},
+    {SOFTTOY_TOUCH_GPIO_HEAD,       "head",       Markers::Id::kTouchHead,      80, false, true},
+    {SOFTTOY_TOUCH_GPIO_TAIL,       "tail",       Markers::Id::kTouchTail,      80, false, true},
 };
 constexpr int kPadCount = sizeof(kPads) / sizeof(kPads[0]);
 
 constexpr int kPollMs = 20;                 // sample period (50 Hz)
-constexpr int kPressSamples = 3;            // delta must stay over the press level this many samples (60 ms)
+// delta must stay over the press level this many samples before the press counts (300 ms).
+// Was 3 (60 ms). Stuffed board 2 (2026-11-13): touching the right foot coupled +22 % into the right
+// hand (wires run together), and the hand crossed its threshold ~220 ms before the foot did, so
+// it won. With 300 ms the foot is already over its threshold when the hand's cross-talk check
+// runs, and the stronger pad wins. Raised again to 1 s (owner's decision, permanent): only a
+// touch held >= 1 s counts, so brushes while she carries or hugs the toy don't trigger; quick
+// pats are ignored on purpose. 1 s also gives the cross-talk check plenty of margin.
+constexpr int kPressSamples = 50;
 constexpr int kReleaseSamples = 5;          // ... and under the release level this many (100 ms)
 constexpr int kReleaseFracPct = 50;         // release level = this % of the press threshold
 constexpr int32_t kMinAbsDelta = 40;        // counts: a floor so a tiny baseline can't make a hair-trigger
@@ -94,7 +104,7 @@ std::atomic<int64_t> g_belly_press_us{0};
 std::mutex g_cb_mutex;
 std::function<void(bool)> g_belly_cb;
 
-const char* StName(St s) {
+[[maybe_unused]] const char* StName(St s) {   // used only by the calibration log
     switch (s) {
         case St::kLearning: return "learning";
         case St::kIdle: return "idle";

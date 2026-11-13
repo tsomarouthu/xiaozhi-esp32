@@ -26,6 +26,15 @@ struct Info {
     bool exempt;         // skips every limit and the online check (the button)
 };
 
+// Mic-less mode: a touch may also start a session from idle, so the server can answer it
+// (touch_test names the pad; otherwise button_only keeps touches silent). Normal mode: touches
+// only react inside a session (M0 convention).
+#if SOFTTOY_BUTTON_ONLY
+constexpr MarkerStart kTouchStart = MarkerStart::kStartOrInSession;
+#else
+constexpr MarkerStart kTouchStart = MarkerStart::kInSessionOnly;
+#endif
+
 // Table order = enum Id. Rates and MarkerStart are the M0 conventions (INTEGRATION-PLAN.md).
 const Info kInfo[] = {
 #if SOFTTOY_BUTTON_ONLY
@@ -35,11 +44,11 @@ const Info kInfo[] = {
 #endif
     {"[greeting: pickup]",    MarkerStart::kStartOnly,        3 * 3600 * kSecUs, false},
     {"[hug]",                 MarkerStart::kStartOrInSession, 60 * kSecUs,       false},
-    {"[touch: right_hand]",   MarkerStart::kInSessionOnly,    10 * kSecUs,       false},
-    {"[touch: left_foot]",    MarkerStart::kInSessionOnly,    10 * kSecUs,       false},
-    {"[touch: right_foot]",   MarkerStart::kInSessionOnly,    10 * kSecUs,       false},
-    {"[touch: head]",         MarkerStart::kInSessionOnly,    10 * kSecUs,       false},
-    {"[touch: tail]",         MarkerStart::kInSessionOnly,    10 * kSecUs,       false},
+    {"[touch: right_hand]",   kTouchStart,                    10 * kSecUs,       false},
+    {"[touch: left_foot]",    kTouchStart,                    10 * kSecUs,       false},
+    {"[touch: right_foot]",   kTouchStart,                    10 * kSecUs,       false},
+    {"[touch: head]",         kTouchStart,                    10 * kSecUs,       false},
+    {"[touch: tail]",         kTouchStart,                    10 * kSecUs,       false},
     {"[motion: shake]",       MarkerStart::kInSessionOnly,    15 * kSecUs,       false},
     {"[motion: upside_down]", MarkerStart::kInSessionOnly,    15 * kSecUs,       false},
     {"[motion: hit]",         MarkerStart::kInSessionOnly,    15 * kSecUs,       false},

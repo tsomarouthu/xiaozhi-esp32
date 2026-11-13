@@ -405,8 +405,24 @@ public:
         return OfflineClip();
     }
 
+    // Keeps the speaker I2S clocks (BCLK GPIO8 / LRC GPIO9) running once output is on. The
+    // AudioService powers output off after 15 s of silence; the clocks stopping shifted every
+    // touch pad's reading by +2..+15% at once (seen 2026-11-13 on board 2, ~19.5 s after boot,
+    // and again after every reply), which looked like all pads touched. With the clocks kept
+    // on, the pads stay in the state their baseline settles in. TX DMA auto-clears after each
+    // send, so an idle output plays silence; the amp's idle draw is a few mA.
+    class ClocksOnCodec : public NoAudioCodecSimplex {
+    public:
+        using NoAudioCodecSimplex::NoAudioCodecSimplex;
+        void EnableOutput(bool enable) override {
+            if (enable) {
+                NoAudioCodecSimplex::EnableOutput(true);
+            }
+        }
+    };
+
     virtual AudioCodec* GetAudioCodec() override {
-        static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+        static ClocksOnCodec audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
             AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
         return &audio_codec;
